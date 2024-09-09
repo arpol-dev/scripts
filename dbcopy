@@ -1,0 +1,68 @@
+#!/bin/bash
+
+DUMP_CMD="vps odoo dump /tmp/db.zip"
+REST_CMD="vps odoo restore ~/tmp/db.zip"
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        -h | --help)
+            echo "Odoo DB copy 1.0.0"
+            echo "Usage: dbcopy [options]"
+            echo "Options"
+            echo "  -r --remote <user> <hostname> <ssh private key path>   SSH datas of the server to dump"
+            echo "  -s <name>                                               Name of the odoo service containing the database to dump (if not 'odoo')"
+            echo "  -b <name>                                               Name of the database to dump (if not 'odoo')"
+            echo "  -S <name>                                               Name of the service where to restore the DB (if not 'odoo')"
+            echo "  -B <name>                                               Name of the restored database (if not 'odoo')"
+            ;;
+        -d | --remote)
+            SSH=true
+            # SSH datas if the dbb is located on an external server
+            USER=$2
+            HOST=$3
+            SSH_KEY=$4 # Clé privée
+            ;;
+        -s)
+            SERVICE=$2 # Nom du service odoo (si différent de "odoo")
+            DUMP_CMD="$DUMP_CMD -s $SERVICE"
+            ;;
+        -d)
+            DB=$2 # Nom de la base de données (si différent de "odoo")
+            DUMP_CMD="$DUMP_CMD -d $DB"
+            ;;
+        -S)
+            TARGET_SERV=$2
+            REST_CMD="$REST_CMD -s $TARGET_SERV"
+            ;;
+        -D)
+            TARGET_DB=$2
+            REST_CMD="$REST_CMD -D $TARGET_DB"
+            ;;            
+    esac
+    shift
+done
+
+echo "Start the compose services"
+compose --debug up
+
+if [ ! -d ~/tmp ]; then
+    echo "Temporary folder ~/tmp created for dump storage"
+    mkdir -p ~/tmp
+fi
+
+if $SSH == true; then
+    echo "Database dumping through SSH" 
+    ssh -i $SSH_KEY $USER@$HOST "$DUMP_CMD"
+    echo "Local copy with SCP"
+    scp -i $SSH_KEY $USER@$HOST:/tmp/db.zip ~/tmp/
+    echo "Distant dump removal"
+    ssh -i $SSH_KEY $USER@$HOST "rm -f /tmp/db.zip"
+else
+    $DUMP_CMD
+fi
+
+echo "Dropping and restoring the local database"
+$REST_CMD
+
+echo "Stop the compose services"
+compose --debug down
